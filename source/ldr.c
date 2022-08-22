@@ -240,7 +240,7 @@ Load
 	-Record				DONE (NEEDS TESTING)
 	-Title				DONE (NEEDS TESTING)
 	-Result				DONE (NEEDS TESTING)
-	-WiFiMenu			(this is in the WiFi overlay)
+	-WiFiMenu			DONE (NEEDS TESTING)
 	-WLMenu				DONE (NEEDS TESTING)
 */
 
