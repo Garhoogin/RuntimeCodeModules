@@ -77,4 +77,15 @@ typedef void (*RCM_UNLOAD_CALLBACK) (u32 imageBase);
 #define HOOK_TREPL(addr,dest)		((void *) ((HOOK_TYPE_TREPL		<< HOOK_SHIFT) | (u32) (addr))), (void *) dest
 #define HOOK_TNSUB(addr,dest)		HOOK_DATA16(addr, 0xB500), HOOK_TREPL(((u32) (addr)) + 2, dest), HOOK_DATA16(((u32) (addr)) + 6, 0xBD00)
 
+//NCP-like synonyms
+#define HOOK_JUMP_AA				HOOK_ANSUB
+#define HOOK_JUMP_TA				HOOK_TNSUB
+#define HOOK_JUMP					HOOK_ANSUB
+#define HOOK_REPL_AA				HOOK_AREPL
+#define HOOK_REPL_TA				HOOK_TREPL
+#define HOOK_REPL					HOOK_AREPL
+#define HOOK_SET8					HOOK_DATA8
+#define HOOK_SET16					HOOK_DATA16
+#define HOOK_SET32					HOOK_DATA32
+
 #define HOOK_TABLE(...)  static volatile void *__attribute__((section(".ftbl"))) __attribute__((__used__)) __ftbl[] = {__VA_ARGS__}
