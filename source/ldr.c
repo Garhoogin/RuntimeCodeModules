@@ -2,6 +2,9 @@
 
 Revision history:
 
+	11/28/2022 Garhoogin:
+		Add data8 hook type
+
 	08/22/2022 Garhoogin:
 		Add hooks to load for different scenes
 
@@ -138,36 +141,45 @@ void LDR_LoadModule(void *pMod) {
 		//don't do writes for load/unload callback types
 		if(hookType == HOOK_TYPE_LOAD || hookType == HOOK_TYPE_UNLOAD) continue;
 		
-		//read old data (NOTE: read in 16-bit units, thumb need not be 32-bit aligned)
-		u16 ohw0 = *(u16 *) (hookSrc + 0);
-		u16 ohw1 = *(u16 *) (hookSrc + 2);
-		
-		//create patch. 
-		s32 rel = hookDest - (hookSrc + 8);
-		switch(hookType) {
-			case HOOK_TYPE_AREPL:
-				*(u32 *) hookSrc = 0xEB000000 | ((rel >> 2) & 0x00FFFFFF);	//BL instruction
-				break;
-			case HOOK_TYPE_ANSUB:
-				*(u32 *) hookSrc = 0xEA000000 | ((rel >> 2) & 0x00FFFFFF);	//B instruction
-				break;
-			case HOOK_TYPE_TREPL:
-				rel += 4; //accommodate thumb encoding
-				*(u16 *) (hookSrc + 0) = 0xF000 | ((rel >> 12) & 0x7FF);
-				*(u16 *) (hookSrc + 2) = 0xE800 | ((rel >> 1) & 0x7FF);
-				break;
-			case HOOK_TYPE_DATA32:	//full word replacement
-				*(u16 *) (hookSrc + 0) = hookTable[i].newDataHw0;
-				*(u16 *) (hookSrc + 2) = hookTable[i].newDataHw1;
-				break;
-			case HOOK_TYPE_DATA16:	//halfword replacement, only first halfword used
-				*(u16 *) hookSrc = hookTable[i].newDataHw0;
-				break;
+		//data8 is special in its alignment requirements
+		if (hookType == HOOK_TYPE_DATA8) {
+			//swap byte to table
+			u8 newByte = hookTable[i].newData[0];
+			u8 oldByte = *(u8 *) hookSrc;
+			*(u8 *) hookSrc = newByte;
+			hookTable[i].oldData[0] = oldByte;
+		} else {
+			//read old data (NOTE: read in 16-bit units, thumb need not be 32-bit aligned)
+			u16 ohw0 = *(u16 *) (hookSrc + 0);
+			u16 ohw1 = *(u16 *) (hookSrc + 2);
+			
+			//create patch. 
+			s32 rel = hookDest - (hookSrc + 8);
+			switch(hookType) {
+				case HOOK_TYPE_AREPL:
+					*(u32 *) hookSrc = 0xEB000000 | ((rel >> 2) & 0x00FFFFFF);	//BL instruction
+					break;
+				case HOOK_TYPE_ANSUB:
+					*(u32 *) hookSrc = 0xEA000000 | ((rel >> 2) & 0x00FFFFFF);	//B instruction
+					break;
+				case HOOK_TYPE_TREPL:
+					rel += 4; //accommodate thumb encoding
+					*(u16 *) (hookSrc + 0) = 0xF000 | ((rel >> 12) & 0x7FF);
+					*(u16 *) (hookSrc + 2) = 0xE800 | ((rel >> 1) & 0x7FF);
+					break;
+				case HOOK_TYPE_DATA32:	//full word replacement
+					*(u16 *) (hookSrc + 0) = hookTable[i].newDataHw0;
+					*(u16 *) (hookSrc + 2) = hookTable[i].newDataHw1;
+					break;
+				case HOOK_TYPE_DATA16:	//halfword replacement, only first halfword used
+					*(u16 *) hookSrc = hookTable[i].newDataHw0;
+					break;
+			}
+			
+			//write old data to table
+			hookTable[i].oldDataHw0 = ohw0;
+			hookTable[i].oldDataHw1 = ohw1;
 		}
-		
-		//write old data to table
-		hookTable[i].oldDataHw0 = ohw0;
-		hookTable[i].oldDataHw1 = ohw1;
 	}
 	
 	//flush DC, invalidate IC
@@ -191,10 +203,19 @@ void LDR_UnloadModule(void *pMod) {
 		u16 *patchLocation = (u16 *) (u32) hookTable[i].branchSrcAddr;
 		int type = hookTable[i].type;
 		
-		//write back in units of 16
 		if(type != HOOK_TYPE_LOAD && type != HOOK_TYPE_UNLOAD) {
-			patchLocation[0] = hookTable[i].oldDataHw0;
-			if(type != HOOK_TYPE_DATA16) patchLocation[1] = hookTable[i].oldDataHw1;
+			//data8 has to be unaligned
+			if (type == HOOK_TYPE_DATA8) {
+				//swap byte to table
+				u8 newByte = hookTable[i].newData[0];
+				u8 oldByte = *(u8 *) patchLocation;
+				*(u8 *) patchLocation = newByte;
+				hookTable[i].oldData[0] = oldByte;
+			} else {
+				//write back in units of 16
+				patchLocation[0] = hookTable[i].oldDataHw0;
+				if(type != HOOK_TYPE_DATA16) patchLocation[1] = hookTable[i].oldDataHw1;
+			}
 		}
 	}
 	
