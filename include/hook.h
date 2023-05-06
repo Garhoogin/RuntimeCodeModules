@@ -11,6 +11,9 @@
 #define R_ARM_JUMP24		29
 #define R_ARM_BASE_ABS		31
 
+#define R_TYPE_MASK         0x7F
+#define R_ZERO_VALUE        0x80
+
 #define HOOK_TYPE_AREPL     0		//ARM branch-and-link replacement
 #define HOOK_TYPE_ANSUB     1		//ARM branch replacement
 #define HOOK_TYPE_TREPL     2		//thumb branch-link-exchange replacement
@@ -49,7 +52,7 @@ typedef struct HOOK_TABLE_ENTRY_ {
 typedef struct RELOCATION_ENTRY_ {
 	u32 offset : 24;	//offset of relocation
 	u32 type : 8;		//type of relocation
-	u32 value;			//value of relocation
+	u32 value;			//value of relocation (optional)
 } RELOCATION_ENTRY;
 
 typedef struct RCM_HEADER_ {
@@ -67,14 +70,14 @@ typedef void (*RCM_LOAD_CALLBACK) (u32 imageBase);
 typedef void (*RCM_UNLOAD_CALLBACK) (u32 imageBase);
 
 
-#define HOOK_DATA8(addr,b)			((void *) ((HOOK_TYPE_DATA8		<< HOOK_SHIFT) | (u32) (addr))), (void *) b
-#define HOOK_DATA16(addr,hw)		((void *) ((HOOK_TYPE_DATA16	<< HOOK_SHIFT) | (u32) (addr))), (void *) hw
-#define HOOK_DATA32(addr,w)			((void *) ((HOOK_TYPE_DATA32	<< HOOK_SHIFT) | (u32) (addr))), (void *) w
+#define HOOK_DATA8(addr,b)			((void *) ((HOOK_TYPE_DATA8		<< HOOK_SHIFT) + (u32) (addr))), (void *) b
+#define HOOK_DATA16(addr,hw)		((void *) ((HOOK_TYPE_DATA16	<< HOOK_SHIFT) + (u32) (addr))), (void *) hw
+#define HOOK_DATA32(addr,w)			((void *) ((HOOK_TYPE_DATA32	<< HOOK_SHIFT) + (u32) (addr))), (void *) w
 #define HOOK_LOAD(dest)				((void *) ((HOOK_TYPE_LOAD		<< HOOK_SHIFT))), (void *) dest
 #define HOOK_UNLOAD(dest)			((void *) ((HOOK_TYPE_UNLOAD	<< HOOK_SHIFT))), (void *) dest
-#define HOOK_AREPL(addr,dest)		((void *) ((HOOK_TYPE_AREPL		<< HOOK_SHIFT) | (u32) (addr))), (void *) dest
-#define HOOK_ANSUB(addr,dest)		((void *) ((HOOK_TYPE_ANSUB		<< HOOK_SHIFT) | (u32) (addr))), (void *) dest
-#define HOOK_TREPL(addr,dest)		((void *) ((HOOK_TYPE_TREPL		<< HOOK_SHIFT) | (u32) (addr))), (void *) dest
+#define HOOK_AREPL(addr,dest)		((void *) ((HOOK_TYPE_AREPL		<< HOOK_SHIFT) + (u32) (addr))), (void *) dest
+#define HOOK_ANSUB(addr,dest)		((void *) ((HOOK_TYPE_ANSUB		<< HOOK_SHIFT) + (u32) (addr))), (void *) dest
+#define HOOK_TREPL(addr,dest)		((void *) ((HOOK_TYPE_TREPL		<< HOOK_SHIFT) + (u32) (addr))), (void *) dest
 #define HOOK_TNSUB(addr,dest)		HOOK_DATA16(addr, 0xB500), HOOK_TREPL(((u32) (addr)) + 2, dest), HOOK_DATA16(((u32) (addr)) + 6, 0xBD00)
 
 //NCP-like synonyms

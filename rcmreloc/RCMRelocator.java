@@ -60,6 +60,21 @@ public class RCMRelocator {
 	public static boolean getSymExists(String[] syms, String sym) {
 		return getSymType(syms, sym) != null;
 	}
+	
+	public static int read32(byte[] b, int offset) {
+		int b0 = ((int) b[offset + 0]) & 0xFF;
+		int b1 = ((int) b[offset + 1]) & 0xFF;
+		int b2 = ((int) b[offset + 2]) & 0xFF;
+		int b3 = ((int) b[offset + 3]) & 0xFF;
+		return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+	}
+	
+	public static void write32(byte[] b, int offset, int n) {
+		b[offset + 0] = (byte) ((n >>>  0) & 0xFF);
+		b[offset + 1] = (byte) ((n >>>  8) & 0xFF);
+		b[offset + 2] = (byte) ((n >>> 16) & 0xFF);
+		b[offset + 3] = (byte) ((n >>> 24) & 0xFF);
+	}
 
 	public static void main(String[] args) {
 		//read arguments. First RCM name, then relocation output from objdump, then symbol output
@@ -115,6 +130,7 @@ public class RCMRelocator {
 			byte[] rcm = Files.readAllBytes(Paths.get(rcmPath));
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();	//relocation table
 			ByteArrayOutputStream thunks = new ByteArrayOutputStream();	//thunks (for ARM->THUMB B)
+			int nRelocations = 0;
 			try {
 				//before relocation output, count the number of times each destination address shows up.
 				Map<Integer, Integer> refCounts = new HashMap<>();
@@ -146,7 +162,39 @@ public class RCMRelocator {
 					boolean isAbs32 = r.type.equals("R_ARM_ABS32") && !isLocal;
 					if(!(isThumb && isB) && !(isRelative && isLocal) && !isAbs32) {
 						if(!(!isLocal && r.value == 0)) { //check external relocations for NULL
+						
+							//let's get smart, try to arrange this so that we may emit a zero-value
+							int type = Relocation.relocTypeFromString(r.type, r.local);
+							int orig;
+							switch (type) {
+								case Relocation.R_ARM_BASE_ABS:
+								case Relocation.R_ARM_ABS32:
+									//we can add to the data in the file.
+									orig = read32(rcm, r.offset);
+									orig += r.value;
+									write32(rcm, r.offset, orig);
+									r.value -= r.value;
+									break;
+								case Relocation.R_ARM_JUMP24:
+								case Relocation.R_ARM_CALL:
+									if (isThumb) break; //unavoidable. Value must exist
+									orig = read32(rcm, r.offset);
+									int instr = orig;
+									
+									//partial relocation; adjust value to 0, don't adjust by base
+									int offset = (orig & 0x00FFFFFF) << 2;
+									if ((offset & 0x02000000) != 0) offset -= 0x04000000;
+									offset = ((offset + r.value) >> 2) & 0x00FFFFFF;
+									orig = (instr & 0xFF000000) | offset;
+									
+									write32(rcm, r.offset, orig);
+									r.value -= r.value;
+									break;
+							}
+							
+							
 							baos.write(r.getBytes()); //write relocation as normal
+							nRelocations++;
 						} else {
 							//external relocation points to NULL
 							//probably means a symbol was not resolved, throw an error
@@ -246,7 +294,7 @@ public class RCMRelocator {
 			
 			//write relocation data
 			int ofsReloc = rcm.length;
-			int szReloc = relocBytes.length >>> 3;
+			int szReloc = nRelocations;
 			rcm[4] = (byte) (ofsReloc & 0xFF);
 			rcm[5] = (byte) ((ofsReloc >>> 8) & 0xFF);
 			rcm[6] = (byte) (szReloc & 0xFF);
@@ -270,6 +318,13 @@ public class RCMRelocator {
 
 class Relocation {
 
+	public static final int ZERO_VALUE     = 0x80;
+	public static final int R_ARM_CALL     = 28;
+	public static final int R_ARM_ABS32    = 2;
+	public static final int R_ARM_JUMP24   = 29;
+	public static final int R_ARM_BASE_ABS = 31;
+	public static final int R_ARM_V4BX     = 40;
+
 	public static int relocTypeFromString(String type, boolean local) {
 		//if local, make the type relative
 		if(local) {
@@ -286,15 +341,15 @@ class Relocation {
 		
 		switch(type) {
 			case "R_ARM_CALL":
-				return 28;
+				return R_ARM_CALL;
 			case "R_ARM_ABS32":
-				return 2;
+				return R_ARM_ABS32;
 			case "R_ARM_JUMP24":
-				return 29;
+				return R_ARM_JUMP24;
 			case "R_ARM_V4BX":
-				return 40;
+				return R_ARM_V4BX;
 			case "R_ARM_BASE_ABS":
-				return 31;
+				return R_ARM_BASE_ABS;
 			default:
 				throw new IllegalStateException("Unknown relocation type " + type);
 		}
@@ -329,17 +384,30 @@ class Relocation {
 		*/
 		int w0 = (relocTypeFromString(this.type, this.local) << 24) | this.offset;
 		int w1 = this.value;
+		byte[] b;
 		
-		byte[] b = {
-			(byte) (w0 & 0xFF),
-			(byte) ((w0 >>> 8) & 0xFF),
-			(byte) ((w0 >>> 16) & 0xFF),
-			(byte) ((w0 >>> 24) & 0xFF),
-			(byte) (w1 & 0xFF),
-			(byte) ((w1 >>> 8) & 0xFF),
-			(byte) ((w1 >>> 16) & 0xFF),
-			(byte) ((w1 >>> 24) & 0xFF)
-		};
+		//new zero-value flag: can we optimize?
+		if (this.value == 0) {
+			w0 |= (Relocation.ZERO_VALUE << 24);
+			b = new byte[] {
+				(byte) (w0 & 0xFF),
+				(byte) ((w0 >>> 8) & 0xFF),
+				(byte) ((w0 >>> 16) & 0xFF),
+				(byte) ((w0 >>> 24) & 0xFF)
+			};
+		} else {
+			b = new byte[] {
+				(byte) (w0 & 0xFF),
+				(byte) ((w0 >>> 8) & 0xFF),
+				(byte) ((w0 >>> 16) & 0xFF),
+				(byte) ((w0 >>> 24) & 0xFF),
+				(byte) (w1 & 0xFF),
+				(byte) ((w1 >>> 8) & 0xFF),
+				(byte) ((w1 >>> 16) & 0xFF),
+				(byte) ((w1 >>> 24) & 0xFF)
+			};
+		}
+		
 		return b;
 	}
 	

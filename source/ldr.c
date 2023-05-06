@@ -2,6 +2,11 @@
 
 Revision history:
 
+	05/06/2023 Garhoogin:
+		Add zero-value relocation flag
+		Allow using external symbols as hook addresses
+		Removed auxiliary hook entry processing
+
 	11/28/2022 Garhoogin:
 		Add data8 hook type
 
@@ -46,8 +51,8 @@ void LDR_CallLoadCallback(void *pMod) {
 	u32 base = (u32) pMod;
 	int i;
 	
-	for(i = 0; i < hdr->nHook; i++){
-		if(hookTable[i].aux || hookTable[i].type != HOOK_TYPE_LOAD) continue;
+	for (i = 0; i < hdr->nHook; i++) {
+		if (hookTable[i].type != HOOK_TYPE_LOAD) continue;
 		RCM_LOAD_CALLBACK callback = (RCM_LOAD_CALLBACK) (hookTable[i].branchDestAddr + base);
 		callback(base);
 	}
@@ -62,8 +67,8 @@ void LDR_CallUnloadCallback(void *pMod) {
 	u32 base = (u32) pMod;
 	int i;
 	
-	for(i = 0; i < hdr->nHook; i++){
-		if(hookTable[i].aux || hookTable[i].type != HOOK_TYPE_UNLOAD) continue;
+	for (i = 0; i < hdr->nHook; i++) {
+		if (hookTable[i].type != HOOK_TYPE_UNLOAD) continue;
 		RCM_UNLOAD_CALLBACK callback = (RCM_UNLOAD_CALLBACK) (hookTable[i].branchDestAddr + base);
 		callback(base);
 	}
@@ -75,19 +80,21 @@ void LDR_CallUnloadCallback(void *pMod) {
 void LDR_Relocate(void *pMod) {
 	RCM_HEADER *hdr = (RCM_HEADER *) pMod;
 	u32 base = (u32) pMod;
-	if(hdr->relocated) return;
+	if (hdr->relocated) return;
 	
 	u16 relocOffset = hdr->relocOffset;
 	u16 nReloc = hdr->relocSize;
 	u16 i;
-	RELOCATION_ENTRY *relocs = (RELOCATION_ENTRY *) (base + relocOffset);
-	for(i = 0; i < nReloc; i++) {
-		RELOCATION_ENTRY *entry = relocs + i;
+	RELOCATION_ENTRY *entry = (RELOCATION_ENTRY *) (base + relocOffset);
+	for (i = 0; i < nReloc; i++) {
+		int type = entry->type & R_TYPE_MASK;
 		u32 destAddr = base + entry->offset;
-		u32 value = entry->value;
-		int type = entry->type;
+		u32 value = 0;
+		if (!(entry->type & R_ZERO_VALUE)) {
+			value = entry->value;
+		}
 		
-		switch(type) {
+		switch (type) {
 			case R_ARM_ABS32:
 				*(u32 *) destAddr += value;
 				break;
@@ -97,15 +104,15 @@ void LDR_Relocate(void *pMod) {
 				u32 instr = *(u32 *) destAddr;
 				s32 offset = *(u32 *) destAddr;
 				
-				if((value & 1) == 0) { //not THUMB
+				if ((value & 1) == 0) { //not THUMB
 					offset = (offset & 0x00FFFFFF) << 2;
-					if(offset & 0x02000000) offset -= 0x04000000;
+					if (offset & 0x02000000) offset -= 0x04000000;
 					offset = ((offset + value - destAddr) >> 2) & 0x00FFFFFF;
 					*(u32 *) destAddr = (instr & 0xFF000000) | offset;
 				} else { //to THUMB
 					offset = ((offset & 0x00FFFFFF) << 2);
-					if((instr & 0xF0000000) == 0xF0000000) offset |= (((offset >> 24) & 1) << 1); //only if the instruction is already in ARM->THUMB encoding
-					if(offset & 0x02000000) offset -= 0x04000000;
+					if ((instr & 0xF0000000) == 0xF0000000) offset |= (((offset >> 24) & 1) << 1); //only if the instruction is already in ARM->THUMB encoding
+					if (offset & 0x02000000) offset -= 0x04000000;
 					offset += (value & 0xFFFFFFFE) - destAddr;
 					*(u32 *) destAddr = (instr & 0xFE000000) | ((offset >> 2) & 0x00FFFFFF) | (((offset >> 1) & 1) << 24) | 0xF0000000;
 				}
@@ -114,6 +121,13 @@ void LDR_Relocate(void *pMod) {
 			case R_ARM_BASE_ABS:
 				*(u32 *) destAddr += value + base;
 				break;
+		}
+		
+		//next relocation. Advance whole relocation for nonzero value
+		if (entry->type & R_ZERO_VALUE) {
+			entry = (RELOCATION_ENTRY *) &entry->value;
+		} else {
+			entry++;
 		}
 	}
 }
@@ -131,15 +145,13 @@ void LDR_LoadModule(void *pMod) {
 	
 	//iterate through the hooks and insert patches
 	HOOK_TABLE_ENTRY *hookTable = hdr->hookTable;
-	for(i = 0; i < nHook; i++){
-		if(hookTable[i].aux) continue;
-		
+	for (i = 0; i < nHook; i++) {
 		u32 hookType = hookTable[i].type;
 		u32 hookDest = hookTable[i].branchDestAddr;
 		u32 hookSrc = hookTable[i].branchSrcAddr;
 		
 		//don't do writes for load/unload callback types
-		if(hookType == HOOK_TYPE_LOAD || hookType == HOOK_TYPE_UNLOAD) continue;
+		if (hookType == HOOK_TYPE_LOAD || hookType == HOOK_TYPE_UNLOAD) continue;
 		
 		//data8 is special in its alignment requirements
 		if (hookType == HOOK_TYPE_DATA8) {
@@ -155,7 +167,7 @@ void LDR_LoadModule(void *pMod) {
 			
 			//create patch. 
 			s32 rel = hookDest - (hookSrc + 8);
-			switch(hookType) {
+			switch (hookType) {
 				case HOOK_TYPE_AREPL:
 					*(u32 *) hookSrc = 0xEB000000 | ((rel >> 2) & 0x00FFFFFF);	//BL instruction
 					break;
@@ -198,12 +210,11 @@ void LDR_UnloadModule(void *pMod) {
 	int i;
 	
 	HOOK_TABLE_ENTRY *hookTable = hdr->hookTable;
-	for(i = nHook; i >= 0; i--) {
-		if(hookTable[i].aux) continue;
+	for (i = nHook; i >= 0; i--) {
 		u16 *patchLocation = (u16 *) (u32) hookTable[i].branchSrcAddr;
 		int type = hookTable[i].type;
 		
-		if(type != HOOK_TYPE_LOAD && type != HOOK_TYPE_UNLOAD) {
+		if (type != HOOK_TYPE_LOAD && type != HOOK_TYPE_UNLOAD) {
 			//data8 has to be unaligned
 			if (type == HOOK_TYPE_DATA8) {
 				//swap byte to table
@@ -214,7 +225,7 @@ void LDR_UnloadModule(void *pMod) {
 			} else {
 				//write back in units of 16
 				patchLocation[0] = hookTable[i].oldDataHw0;
-				if(type != HOOK_TYPE_DATA16) patchLocation[1] = hookTable[i].oldDataHw1;
+				if (type != HOOK_TYPE_DATA16) patchLocation[1] = hookTable[i].oldDataHw1;
 			}
 		}
 	}
