@@ -37,9 +37,4 @@ SECTIONS {
 		_end = __bss_end__ ;
 		__end__ = __bss_end__ ;
 	}
-	
-	.fill : {
-		. = ALIGN(4);
-		LONG(0) /* hack to make GCC actually align */
-	}
 }

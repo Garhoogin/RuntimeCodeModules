@@ -75,6 +75,13 @@ public class RCMRelocator {
 		b[offset + 2] = (byte) ((n >>> 16) & 0xFF);
 		b[offset + 3] = (byte) ((n >>> 24) & 0xFF);
 	}
+	
+	public static byte[] padBytes(byte[] b, int alignment) {
+		int paddedSize = ((b.length + (alignment - 1)) / alignment) * alignment;
+		byte[] padded = new byte[paddedSize];
+		System.arraycopy(b, 0, padded, 0, b.length);
+		return padded;
+	}
 
 	public static void main(String[] args) {
 		//read arguments. First RCM name, then relocation output from objdump, then symbol output
@@ -127,7 +134,7 @@ public class RCMRelocator {
 		
 		//generate relocation section
 		try {
-			byte[] rcm = Files.readAllBytes(Paths.get(rcmPath));
+			byte[] rcm = padBytes(Files.readAllBytes(Paths.get(rcmPath)), 4);
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();	//relocation table
 			ByteArrayOutputStream thunks = new ByteArrayOutputStream();	//thunks (for ARM->THUMB B)
 			int nRelocations = 0;
