@@ -75,7 +75,7 @@ CFLAGS	:=	-g -Wall -Os\
 CFLAGS	+=	$(INCLUDE)
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
-ASFLAGS	:=	-g $(ARCH)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE)
 LDFLAGS	=	-r -T $(CURDIR)/../../symbols.x -T $(CURDIR)/../linker.x -g $(ARCH) -Map newcode.map
 
 #---------------------------------------------------------------------------------

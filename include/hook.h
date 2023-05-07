@@ -1,10 +1,15 @@
 #pragma once
 
+#ifndef __ASSEMBLER__
+
 #ifdef SDK_ARM9
-#	include <nitro.h>
-#else
-#	include <nds.h>
-#endif
+#include <nitro.h>
+#else  //SDK_ARM9
+#include <nds.h>
+#endif //SDK_ARM9
+
+#endif //__ASSEMBLER__
+
 
 #define R_ARM_ABS32			2
 #define R_ARM_CALL			28
@@ -29,6 +34,8 @@
 #define ADDRESS_MASK        0x0FFFFFFF
 #define AUX_SHIFT           31
 #define AUX_MASK            0x80000000
+
+#ifndef __ASSEMBLER__
 
 typedef struct HOOK_TABLE_ENTRY_ {
 	u32 branchSrcAddr : 28;			//memory location of patch source
@@ -80,6 +87,21 @@ typedef void (*RCM_UNLOAD_CALLBACK) (u32 imageBase);
 #define HOOK_TREPL(addr,dest)		((void *) ((HOOK_TYPE_TREPL		<< HOOK_SHIFT) + (u32) (addr))), (void *) dest
 #define HOOK_TNSUB(addr,dest)		HOOK_DATA16(addr, 0xB500), HOOK_TREPL(((u32) (addr)) + 2, dest), HOOK_DATA16(((u32) (addr)) + 6, 0xBD00)
 
+#else //__ASSEMBLER__
+
+#define HOOK_DATA8(addr,b)           ((HOOK_TYPE_DATA8  << HOOK_SHIFT) + addr), b
+#define HOOK_DATA16(addr,hw)         ((HOOK_TYPE_DATA16 << HOOK_SHIFT) + addr), hw
+#define HOOK_DATA32(addr,w)          ((HOOK_TYPE_DATA32 << HOOK_SHIFT) + addr), w
+#define HOOK_LOAD(dest)              ((HOOK_TYPE_LOAD   << HOOK_SHIFT)), dest
+#define HOOK_UNLOAD(dest)            ((HOOK_TYPE_UNLOAD << HOOK_SHIFT)), dest
+#define HOOK_AREPL(addr,dest)        ((HOOK_TYPE_AREPL  << HOOK_SHIFT) + addr), dest
+#define HOOK_ANSUB(addr,dest)        ((HOOK_TYPE_ANSUB  << HOOK_SHIFT) + addr), dest
+#define HOOK_TREPL(addr,dest)        ((HOOK_TYPE_TREPL  << HOOK_SHIFT) + addr), dest
+#define HOOK_TNSUB(addr,dest)        HOOK_DATA16(addr, 0xB500), HOOK_TREPL((addr) + 2, dest), HOOK_DATA16((addr) + 6, 0xBD00)
+
+#endif //__ASSEMBLER__
+
+
 //NCP-like synonyms
 #define HOOK_JUMP_AA				HOOK_ANSUB
 #define HOOK_JUMP_TA				HOOK_TNSUB
@@ -91,4 +113,13 @@ typedef void (*RCM_UNLOAD_CALLBACK) (u32 imageBase);
 #define HOOK_SET16					HOOK_DATA16
 #define HOOK_SET32					HOOK_DATA32
 
+
+#ifndef __ASSEMBLER__
+
 #define HOOK_TABLE(...)  static volatile void *__attribute__((section(".ftbl"))) __attribute__((__used__)) __ftbl[] = {__VA_ARGS__}
+
+#else  //__ASSEMBLER__
+
+#define HOOK_TABLE(...)  .section .ftbl ; .word __VA_ARGS__ ; .section .text
+
+#endif //__ASSEMBLER__
